@@ -6,7 +6,7 @@ from aiogram.enums import ParseMode
 import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
-OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render автоматически подставит ваш URL
 
 bot = Bot(token=TOKEN)
