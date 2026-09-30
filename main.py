@@ -21,7 +21,7 @@ async def handle_message(message: types.Message):
     user_text = message.text
     if not user_text:
         return
-    
+        
     # Запрос к OpenRouter API (бесплатная модель DeepSeek/Llama)
     headers = {
         "Authorization": f"Bearer {OPENROUTER_KEY}",
@@ -31,7 +31,6 @@ async def handle_message(message: types.Message):
         "model": "deepseek/deepseek-chat:free", 
         "messages": [{"role": "user", "content": user_text}]
     }
-    
     response = requests.post("https://openrouter.ai", headers=headers, json=data)
     try:
         res_json = response.json()
@@ -48,7 +47,7 @@ async def on_startup():
     await bot.set_webhook(full_url)
     app.state.bot = bot
     app.state.dp = dp
-
+    
 @app.post(f"/webhook/{TOKEN}")
 async def incoming_webhook(request: Request):
     update = await request.json()
