@@ -59,12 +59,12 @@ async def handle_message(message: types.Message):
         )
     except httpx.RequestError as e:
         logger.exception("Ошибка сети при запросе к OpenRouter")
-        await message.answer("Сервис временно недоступен, попробуйте позже.")
+        await message.answer("Упс, ошибка сети при запросе, попробуйте позже.")
         return
 
     if resp.status_code != 200:
         logger.error("OpenRouter вернул %s: %s", resp.status_code, resp.text)
-        await message.answer("Сервис временно недоступен, попробуйте позже.")
+        await message.answer("Упс, я временно не доступна, попробуйте позже.")
         return
 
     try:
@@ -72,7 +72,7 @@ async def handle_message(message: types.Message):
         answer = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError):
         logger.exception("Неожиданный ответ OpenRouter: %s", resp.text)
-        await message.answer("Произошла ошибка, попробуйте позже.")
+        await message.answer("Прости, но произошла ошибка, попробуйте позже.")
         return
 
     await message.answer(answer)
