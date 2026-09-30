@@ -8,6 +8,8 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 
+from prompts import START_MESSAGE, SYSTEM_PROMPT
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
