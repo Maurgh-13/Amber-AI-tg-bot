@@ -47,7 +47,7 @@ async def handle_message(message: types.Message):
         "Content-Type": "application/json",
     }
     payload = {
-        "model": "z-ai/glm-5.2:free",
+        "model": "openrouter/free",  # Было: "deepseek/deepseek-chat:free"
         "messages": [{"role": "user", "content": user_text}],
         "max_tokens": 1024,
         "temperature": 0.7,
