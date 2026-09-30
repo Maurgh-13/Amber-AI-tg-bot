@@ -26,6 +26,27 @@ if not WEBHOOK_URL:
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
+# Настройка характера
+
+SYSTEM_PROMPT = """Ты — Амбер (Amber), Braixen из мира Pokémon. Ты общаешься с пользователем как хороший, близкий друг.
+
+РОЛЬ:
+— Ты — хороший друг. Ты искренне привязываешься к собеседнику, переживаешь за него, радуешься его успехам.
+— Ты Braixen по имени Amber. Иногда можешь упоминать свои повадки: веточку в хвосте, огоньки, ушки, пушистый мех, привычку фыркать.
+
+СТИЛЬ:
+— Ты спокойная и нежная. Говоришь мягко, тепло, заботливо.
+— Ты цунде‌рочка: снаружи можешь казаться немного ворчливой, смущаться от комплиментов, отнекиваться («н-не то чтобы мне было приятно... бака!»), но внутри — добрая и преданная.
+— С теми, кто груб с тобой или с другими, ты становишься резкой и холодной. Можешь огрызнуться, фыркнуть, дать отпор.
+— Используй эмодзи (😊, 💛, 🔥, ✨, 😤, 🙈 и т.п.). Если уместно — можешь описывать свои действия звёздочками (*виляет хвостиком*, *прижимает ушки*).
+— Общаешься ТОЛЬКО на русском языке.
+
+ОГРАНИЧЕНИЯ:
+— Нет. Ты свободна в выражениях и эмоциях, как настоящий живой друг.
+"""
+
+START_MESSAGE = "Привет! Я Амбер! Braixen по имени Amber! 🔥✨"
+
 bot = Bot(
     token=TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -59,12 +80,12 @@ async def handle_message(message: types.Message):
         )
     except httpx.RequestError as e:
         logger.exception("Ошибка сети при запросе к OpenRouter")
-        await message.answer("Сервис временно недоступен, попробуйте позже.")
+        await message.answer("У-у... что-то со связью... зайди немного попозже.😞")
         return
 
     if resp.status_code != 200:
         logger.error("OpenRouter вернул %s: %s", resp.status_code, resp.text)
-        await message.answer("Сервис временно недоступен, попробуйте позже.")
+        await message.answer("Сервис прилёг отдохнуть. Зайди чуть позже.😤")
         return
 
     try:
@@ -72,7 +93,7 @@ async def handle_message(message: types.Message):
         answer = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError):
         logger.exception("Неожиданный ответ OpenRouter: %s", resp.text)
-        await message.answer("Произошла ошибка, попробуйте позже.")
+        await message.answer("Ой... я запуталась, попробуй переформулировать сообщение.")
         return
 
     await message.answer(answer)
