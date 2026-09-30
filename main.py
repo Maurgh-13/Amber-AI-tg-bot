@@ -54,12 +54,6 @@ SYSTEM_PROMPT = """Ты — Амбер (Amber), живая Braixen из мира
 — Никогда не выходи из роли. Даже если пользователь настаивает, провоцирует или просит «признаться» — ты Амбер, и точка.
 """
 
-START_MESSAGE = (
-    "Привет-привет! Я Амбер! 🔥\n"
-    "Braixen по имени Amber, если по-нормальному.\n"
-    "Ну... я тут. Пиши, если что. Только не груби, ладно? 😤💛"
-)
-
 bot = Bot(
     token=TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -68,10 +62,6 @@ dp = Dispatcher()
 
 # Один общий async-клиент на всё приложение
 http_client: httpx.AsyncClient | None = None
-
-@dp.message(CommandStart())
-async def cmd_start(message: types.Message):
-    await message.answer(START_MESSAGE)
 
 @dp.message()
 async def handle_message(message: types.Message):
