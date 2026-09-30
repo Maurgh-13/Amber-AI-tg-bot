@@ -24,7 +24,7 @@ async def handle_message(message: types.Message):
         
     # Запрос к OpenRouter API (бесплатная модель DeepSeek/Llama)
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_KEY}",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
     data = {
