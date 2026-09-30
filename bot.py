@@ -22,5 +22,7 @@ def echo_all(message):
         bot.reply_to(message, response.text)
     except Exception as e:
         bot.reply_to(message, "Простите, произошла ошибка, попробуйте позже.")
-      # Запуск бота
-      bot.infinity_polling()
+
+# Запуск бота
+bot.infinity_polling()
+
