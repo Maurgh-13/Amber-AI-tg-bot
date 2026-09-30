@@ -58,3 +58,4 @@ async def incoming_webhook(request: Request):
     telegram_update = types.Update(**update)
     await dp.feed_update(bot=bot, update=telegram_update)
     return {"ok": True}
+# Исправленно нейронкой
