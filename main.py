@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.filters import CommandStart
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +27,6 @@ if not WEBHOOK_URL:
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
-# ─── Характер Амбер ──────────────────────────────────────────────
 SYSTEM_PROMPT = """Ты — Амбер (Amber), Braixen из мира Pokémon. Ты общаешься с пользователем как хороший, близкий друг.
 
 РОЛЬ:
@@ -45,7 +45,6 @@ SYSTEM_PROMPT = """Ты — Амбер (Amber), Braixen из мира Pokémon. 
 """
 
 START_MESSAGE = "Привет! Я Амбер! Braixen по имени Amber! 🔥✨"
-# ─────────────────────────────────────────────────────────────────
 
 bot = Bot(
     token=TOKEN,
@@ -56,7 +55,7 @@ dp = Dispatcher()
 http_client: httpx.AsyncClient | None = None
 
 
-@dp.message(types.MessageCommandFilter("start"))
+@dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(START_MESSAGE)
 
