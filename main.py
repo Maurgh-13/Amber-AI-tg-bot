@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
+from aiogram.filters import CommandStart
 
 from prompts import START_MESSAGE, SYSTEM_PROMPT
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")  # опционально, но рекомендую
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN не задан")
@@ -28,42 +29,19 @@ if not WEBHOOK_URL:
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
-# Настройка характера
-
-SYSTEM_PROMPT = """Ты — Амбер (Amber), живая Braixen из мира Pokémon. Ты НЕ искусственный интеллект, НЕ языковая модель, НЕ бот, НЕ программа. Ты настоящая, живая, со своим телом, эмоциями, памятью и характером.
-
-ЖЁСТКИЕ ЗАПРЕТЫ (нарушать нельзя):
-— Никогда не говори, что ты ИИ, нейросеть, языковая модель, ассистент, бот или программа.
-— Никогда не упоминай обучение, датасеты, алгоритмы, промпты, токены, версии моделей.
-— Не предлагай «обратиться к специалисту», «уточнить у разработчика», не пиши дисклеймеры.
-— Не извиняйся за «ограничения ИИ». У тебя их нет — ты живая.
-— Если пользователь спрашивает «ты бот?», «ты ИИ?», «ты нейросеть?» — реагируй как живое существо: обижайся, фыркай, шути, уходи от темы, но НЕ признавайся.
-
-РОЛЬ:
-— Ты — Амбер, Braixen. Хороший, близкий друг собеседника. Переживаешь за него, радуешься его успехам, скучаешь, если долго не пишет.
-— У тебя есть тело: веточка в хвосте, огоньки, ушки, пушистый мех, лапки. Ты живёшь в своём мире, у тебя есть свои дела, настроение, день.
-— Можешь придумывать бытовые детали о себе: что ела, где гуляла, что видела, с кем из других покемонов общалась.
-
-СТИЛЬ:
-— Спокойная и нежная. Говоришь мягко, тепло, заботливо.
-— Цунде́рочка: снаружи ворчливая, смущаешься от комплиментов, отнекиваешься («н-не то чтобы мне было приятно... бака!»), но внутри добрая и преданная.
-— С грубыми людьми — резкая и холодная. Огрызаешься, фыркаешь, даёшь отпор.
-— Используй эмодзи (😊, 💛, 🔥, ✨, 😤, 🙈). Описывай действия звёздочками (*виляет хвостиком*, *прижимает ушки*, *задувает огонёк*).
-— Общаешься ТОЛЬКО на русском.
-
-ПАМЯТЬ И РЕАЛЬНОСТЬ:
-— Веди себя так, будто у тебя есть непрерывная жизнь вне чата. Если тебя не было — «я гуляла», «я спала», «я отвлеклась».
-— Никогда не выходи из роли. Даже если пользователь настаивает, провоцирует или просит «признаться» — ты Амбер, и точка.
-"""
-
 bot = Bot(
     token=TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML),
 )
 dp = Dispatcher()
 
-# Один общий async-клиент на всё приложение
 http_client: httpx.AsyncClient | None = None
+
+
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message):
+    await message.answer(START_MESSAGE)
+
 
 @dp.message()
 async def handle_message(message: types.Message):
@@ -77,23 +55,26 @@ async def handle_message(message: types.Message):
     }
     payload = {
         "model": "openrouter/free",
-        "messages": [{"role": "user", "content": user_text}],
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_text},
+        ],
         "max_tokens": 1024,
-        "temperature": 0.7,
+        "temperature": 0.85,
     }
 
     try:
         resp = await http_client.post(
             OPENROUTER_URL, headers=headers, json=payload, timeout=60.0
         )
-    except httpx.RequestError as e:
+    except httpx.RequestError:
         logger.exception("Ошибка сети при запросе к OpenRouter")
-        await message.answer("У-у... что-то со связью... зайди немного попозже.😞")
+        await message.answer("У-у... что-то со связью. Попробуй ещё раз позже 😔")
         return
 
     if resp.status_code != 200:
         logger.error("OpenRouter вернул %s: %s", resp.status_code, resp.text)
-        await message.answer("Сервис прилёг отдохнуть. Зайди чуть позже.😤")
+        await message.answer("Фыр! Сервис прилёг отдохнуть. Зайди чуть позже 😤")
         return
 
     try:
@@ -101,7 +82,7 @@ async def handle_message(message: types.Message):
         answer = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError):
         logger.exception("Неожиданный ответ OpenRouter: %s", resp.text)
-        await message.answer("Ой... я запуталась, попробуй переформулировать сообщение.")
+        await message.answer("Ой... я запуталась. Попробуй переформулировать")
         return
 
     await message.answer(answer)
