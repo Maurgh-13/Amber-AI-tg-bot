@@ -1,28 +1,57 @@
 import os
-import telebot
-import google.generativeai as genai
+import logging
+from fastapi import FastAPI, Request
+from aiogram import Bot, Dispatcher, types
+from aiogram.enums import ParseMode
+import requests
 
-# Подключаем ключи из настроек хостинга
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-AI_TOKEN = os.environ.get('AI_TOKEN')
+TOKEN = os.getenv("BOT_TOKEN")
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY")
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render автоматически подставит ваш URL
 
-bot = telebot.TeleBot(BOT_TOKEN)
-genai.configure(api_key=AI_TOKEN)
-model = genai.GenerativeModel('gemini-pro')
+bot = Bot(token=TOKEN)
+dp = Dispatcher()
+app = FastAPI()
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "Привет! Я Амбер! Braixen по имени Amber!")
+@dp.message()
+for_ai = {}
 
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
+@dp.message()
+async def handle_message(message: types.Message):
+    user_text = message.text
+    if not user_text:
+        return
+    
+    # Запрос к OpenRouter API (бесплатная модель DeepSeek/Llama)
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "deepseek/deepseek-chat:free", 
+        "messages": [{"role": "user", "content": user_text}]
+    }
+    
+    response = requests.post("https://openrouter.ai", headers=headers, json=data)
     try:
-        # Отправляем текст пользователя в нейросеть
-        response = model.generate_content(message.text)
-        bot.reply_to(message, response.text)
+        res_json = response.json()
+        answer = res_json["choices"][0]["message"]["content"]
     except Exception as e:
-        bot.reply_to(message, "Простите, произошла ошибка, попробуйте позже.")
+        answer = "Простите, произошла ошибка, попробуйте позже: {str(e)}"
+        
+    await message.answer(answer)
 
-# Запуск бота
-bot.infinity_polling()
+@app.on_event("startup")
+async def on_startup():
+    webhook_path = f"/webhook/{TOKEN}"
+    full_url = f"{WEBHOOK_URL}{webhook_path}"
+    await bot.set_webhook(full_url)
+    app.state.bot = bot
+    app.state.dp = dp
 
+@app.post(f"/webhook/{TOKEN}")
+async def incoming_webhook(request: Request):
+    update = await request.json()
+    telegram_update = types.Update(**update)
+    await dp.feed_update(bot=bot, update=telegram_update)
+    return {"ok": True}
