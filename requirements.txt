@@ -4,4 +4,3 @@ fastapi
 uvicorn
 aiogram
 requests
-PYTHON_VERSION==26.2.1
