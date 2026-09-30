@@ -1,6 +1,5 @@
 pyTelegramBotAPI
-google-generativeai
+aiogram>=3.13
 fastapi
 uvicorn
-aiogram
-requests
+httpx
