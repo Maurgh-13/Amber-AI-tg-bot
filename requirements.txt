@@ -1,2 +1,6 @@
 pyTelegramBotAPI
 google-generativeai
+fastapi
+uvicorn
+aiogram
+requests
