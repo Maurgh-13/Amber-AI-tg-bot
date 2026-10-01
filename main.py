@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 
@@ -32,13 +31,13 @@ if not WEBHOOK_URL:
     raise RuntimeError("RENDER_EXTERNAL_URL не задан")
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct:free"  # бесплатная vision-модель
-MAIN_MODEL = "openrouter/free"                       # роутер для текста
+VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct:free"
+MAIN_MODEL = "openrouter/free"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
 # ── Стикеры (вставь свои file_id) ────────────────────
 STICKERS = {
-    "happy": "CAACAgIAAxkBAAE...",   # замени на реальный file_id
+    "happy": "CAACAgIAAxkBAAE...",
     "sad":   "CAACAgIAAxkBAAE...",
     "love":  "CAACAgIAAxkBAAE...",
     "angry": "CAACAgIAAxkBAAE...",
@@ -49,18 +48,16 @@ STICKERS = {
 COOLDOWN_SECONDS = 3
 user_cooldown: dict[int, float] = {}
 
-# ── Объекты ──────────────────────────────────────────
-bot = Bot(
-    token=TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-)
+# ── Объекты (БЕЗ ParseMode — иначе Telegram падает на <> в ответах модели) ──
+bot = Bot(token=TOKEN)
 dp = Dispatcher()
 http_client: httpx.AsyncClient | None = None
 
 
 # ── Хелперы ──────────────────────────────────────────
 def parse_sticker_marker(text: str) -> tuple[str, str | None]:
-    """Ищет [STICKER:emotion] в ответе, возвращает (очищенный_текст, эмоция)."""
+    if not text:
+        return "", None
     match = re.search(r"\[STICKER:(\w+)\]", text)
     if not match:
         return text, None
@@ -70,7 +67,6 @@ def parse_sticker_marker(text: str) -> tuple[str, str | None]:
 
 
 async def send_long_message(message: types.Message, text: str, chunk_size: int = 4000):
-    """Режет длинный текст по границам предложений, шлёт с паузой."""
     if not text:
         return
     if len(text) <= chunk_size:
@@ -101,7 +97,6 @@ async def send_long_message(message: types.Message, text: str, chunk_size: int =
 
 
 async def download_as_base64(file_id: str, mime: str = "image/jpeg") -> str:
-    """Скачивает файл из Telegram и кодирует в base64 data-URL."""
     file = await bot.get_file(file_id)
     buf = await bot.download_file(file.file_path)
     data = base64.b64encode(buf.read()).decode()
@@ -109,7 +104,6 @@ async def download_as_base64(file_id: str, mime: str = "image/jpeg") -> str:
 
 
 async def ask_openrouter(messages: list, model: str = MAIN_MODEL) -> str:
-    """Отправляет запрос в OpenRouter, возвращает текст ответа."""
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -123,15 +117,27 @@ async def ask_openrouter(messages: list, model: str = MAIN_MODEL) -> str:
     resp = await http_client.post(
         OPENROUTER_URL, headers=headers, json=payload, timeout=60.0
     )
+    logger.info("OpenRouter status=%s model=%s", resp.status_code, model)
+
     if resp.status_code != 200:
         logger.error("OpenRouter %s: %s", resp.status_code, resp.text)
-        raise RuntimeError(f"OpenRouter вернул {resp.status_code}")
+        raise RuntimeError(f"OpenRouter {resp.status_code}: {resp.text[:200]}")
+
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+
+    if "choices" not in data or not data["choices"]:
+        logger.error("OpenRouter без choices: %s", str(data)[:300])
+        raise RuntimeError("Нет choices в ответе")
+
+    content = data["choices"][0].get("message", {}).get("content")
+    if not content:
+        logger.error("OpenRouter пустой content: %s", str(data)[:300])
+        raise RuntimeError("Пустой content от модели")
+
+    return content
 
 
 async def describe_image(base64_url: str, user_text: str) -> str:
-    """Прогоняет картинку через vision-модель, возвращает описание."""
     messages = [
         {
             "role": "user",
@@ -148,7 +154,6 @@ async def describe_image(base64_url: str, user_text: str) -> str:
 
 
 async def reply_as_amber(message: types.Message, user_content: str):
-    """Основная логика ответа Амбер: промпт + маркеры стикеров + нарезка."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
@@ -186,16 +191,16 @@ async def handle_photo(message: types.Message):
     if is_on_cooldown(message.from_user.id):
         return
     try:
-        # Берём самый большой размер фото
         file_id = message.photo[-1].file_id
         b64 = await download_as_base64(file_id, mime="image/jpeg")
         description = await describe_image(b64, message.caption or "")
         await reply_as_amber(
-            message, f"Пользователь прислал картинку. Вот её описание: {description}"
+            message,
+            f"Пользователь прислал картинку. Вот её описание: {description}",
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Ошибка обработки фото")
-        await message.answer("Ой... не разглядела картинку 🙈")
+        await message.answer(f"Ой... не разглядела картинку 🙈 [{type(e).__name__}]")
 
 
 @dp.message(F.sticker)
@@ -203,15 +208,14 @@ async def handle_sticker(message: types.Message):
     if is_on_cooldown(message.from_user.id):
         return
     try:
-        # Стикеры бывают .webp, .tgs (анимированные), .webm (видео)
         emoji = message.sticker.emoji or "❓"
         await reply_as_amber(
             message,
             f"Пользователь прислал стикер с эмодзи {emoji}. Отреагируй живо, коротко.",
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Ошибка обработки стикера")
-        await message.answer("*прижимает ушки* ...не поняла стикер 🙈")
+        await message.answer(f"*прижимает ушки* ...не поняла стикер 🙈 [{type(e).__name__}]")
 
 
 @dp.message(F.animation)
@@ -223,16 +227,15 @@ async def handle_animation(message: types.Message):
             message,
             "Пользователь прислал гифку. Отреагируй коротко и живо, как друг.",
         )
-    except Exception:
+    except Exception as e:
         logger.exception("Ошибка обработки гиф")
-        await message.answer("Ой, гифка не открылась 😤")
+        await message.answer(f"Ой, гифка не открылась 😤 [{type(e).__name__}]")
 
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
     if is_on_cooldown(message.from_user.id):
         return
-    # Голосовые пока не расшифровываем — просто реагируем
     await message.answer("*наклоняет ушки* ...я пока не понимаю голосовые 😔")
 
 
@@ -244,9 +247,13 @@ async def handle_message(message: types.Message):
         return
     try:
         await reply_as_amber(message, message.text)
-    except Exception:
+    except Exception as e:
         logger.exception("Ошибка обработки текста")
-        await message.answer("Фыр! Что-то сломалось. Попробуй ещё раз 😤")
+        # Временно показываем реальную ошибку — как поймёшь причину, убери строку с ошибкой
+        await message.answer(
+            f"Фыр! Что-то сломалось. Попробуй ещё раз 😤\n"
+            f"Причина: {type(e).__name__}: {str(e)[:200]}"
+        )
 
 
 # ── FastAPI ──────────────────────────────────────────
