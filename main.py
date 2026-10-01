@@ -9,10 +9,10 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import CommandStart
 
 from prompts import START_MESSAGE, SYSTEM_PROMPT
+from stickers import STICKERS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+BOT_USERNAME = os.getenv("BOT_USERNAME", "")  # например, AmberAIBot (без @)
 
 if not TOKEN:
     raise RuntimeError("BOT_TOKEN не задан")
@@ -35,26 +36,41 @@ VISION_MODEL = "qwen/qwen2.5-vl-72b-instruct:free"
 MAIN_MODEL = "openrouter/free"
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 
-# ── Стикеры (вставь свои file_id) ────────────────────
-STICKERS = {
-    "happy": "CAACAgIAAxkBAAE...",
-    "sad":   "CAACAgIAAxkBAAE...",
-    "love":  "CAACAgIAAxkBAAE...",
-    "angry": "CAACAgIAAxkBAAE...",
-    "shy":   "CAACAgIAAxkBAAE...",
-}
-
 # ── Антифлуд ─────────────────────────────────────────
 COOLDOWN_SECONDS = 3
 user_cooldown: dict[int, float] = {}
 
-# ── Объекты (БЕЗ ParseMode — иначе Telegram падает на <> в ответах модели) ──
+# ── Объекты ──────────────────────────────────────────
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 http_client: httpx.AsyncClient | None = None
 
 
 # ── Хелперы ──────────────────────────────────────────
+def is_addressed_to_bot(message: types.Message) -> bool:
+    """Личка — всегда True. Группа — только упоминание @username или reply на бота."""
+    if message.chat.type == "private":
+        return True
+
+    if message.chat.type in ("group", "supergroup"):
+        text = message.text or message.caption or ""
+        if BOT_USERNAME and f"@{BOT_USERNAME}" in text:
+            return True
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.id == bot.id:
+                return True
+        return False
+
+    return False
+
+
+def strip_bot_mention(text: str) -> str:
+    """Убирает @username бота из текста, чтобы модель его не видела."""
+    if not text or not BOT_USERNAME:
+        return text
+    return text.replace(f"@{BOT_USERNAME}", "").strip()
+
+
 def parse_sticker_marker(text: str) -> tuple[str, str | None]:
     if not text:
         return "", None
@@ -188,12 +204,15 @@ async def cmd_start(message: types.Message):
 
 @dp.message(F.photo)
 async def handle_photo(message: types.Message):
+    if not is_addressed_to_bot(message):
+        return
     if is_on_cooldown(message.from_user.id):
         return
     try:
         file_id = message.photo[-1].file_id
         b64 = await download_as_base64(file_id, mime="image/jpeg")
-        description = await describe_image(b64, message.caption or "")
+        caption = strip_bot_mention(message.caption or "")
+        description = await describe_image(b64, caption)
         await reply_as_amber(
             message,
             f"Пользователь прислал картинку. Вот её описание: {description}",
@@ -205,6 +224,8 @@ async def handle_photo(message: types.Message):
 
 @dp.message(F.sticker)
 async def handle_sticker(message: types.Message):
+    if not is_addressed_to_bot(message):
+        return
     if is_on_cooldown(message.from_user.id):
         return
     try:
@@ -215,11 +236,15 @@ async def handle_sticker(message: types.Message):
         )
     except Exception as e:
         logger.exception("Ошибка обработки стикера")
-        await message.answer(f"*прижимает ушки* ...не поняла стикер 🙈 [{type(e).__name__}]")
+        await message.answer(
+            f"*прижимает ушки* ...не поняла стикер 🙈 [{type(e).__name__}]"
+        )
 
 
 @dp.message(F.animation)
 async def handle_animation(message: types.Message):
+    if not is_addressed_to_bot(message):
+        return
     if is_on_cooldown(message.from_user.id):
         return
     try:
@@ -234,6 +259,8 @@ async def handle_animation(message: types.Message):
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
+    if not is_addressed_to_bot(message):
+        return
     if is_on_cooldown(message.from_user.id):
         return
     await message.answer("*наклоняет ушки* ...я пока не понимаю голосовые 😔")
@@ -243,13 +270,17 @@ async def handle_voice(message: types.Message):
 async def handle_message(message: types.Message):
     if not message.text:
         return
+    if not is_addressed_to_bot(message):
+        return
     if is_on_cooldown(message.from_user.id):
         return
     try:
-        await reply_as_amber(message, message.text)
+        text = strip_bot_mention(message.text)
+        if not text:
+            return
+        await reply_as_amber(message, text)
     except Exception as e:
         logger.exception("Ошибка обработки текста")
-        # Временно показываем реальную ошибку — как поймёшь причину, убери строку с ошибкой
         await message.answer(
             f"Фыр! Что-то сломалось. Попробуй ещё раз 😤\n"
             f"Причина: {type(e).__name__}: {str(e)[:200]}"
@@ -259,8 +290,14 @@ async def handle_message(message: types.Message):
 # ── FastAPI ──────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global http_client
+    global http_client, BOT_USERNAME
     http_client = httpx.AsyncClient()
+
+    # Автоматически получаем username бота, если не задан в env
+    if not BOT_USERNAME:
+        me = await bot.get_me()
+        BOT_USERNAME = me.username
+        logger.info("BOT_USERNAME получен автоматически: @%s", BOT_USERNAME)
 
     full_url = f"{WEBHOOK_URL}{WEBHOOK_PATH}"
     await bot.set_webhook(
